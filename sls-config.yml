@@ -1,0 +1,22 @@
+dev:
+  lambdaRole: 'CCSSMAutomationExecutionRole'
+  lambdaAccountId: '291389708984'
+  xRoleName: 'CloudCoreSvcReadOnly'
+  xRoleAccountId: '291389708984' #ESS-POC
+  awsRegion: 'us-east-1'
+  snsNotificationTopic: 'arn:aws:sns:us-east-1:291389708984:sls-notification'
+prod:
+  lambdaRole: 'CCSSMAutomationExecutionRole'
+  lambdaAccountId: '291389708984'
+  xRoleName: 'CloudCoreSvcReadOnly'
+  xRoleAccountId: '291389708984' #ESS-POC
+  awsRegion: 'us-east-1'
+  snsNotificationTopic: 'arn:aws:sns:us-east-1:291389708984:sls-notification'
+local:
+  lambdaRole: 'CCSSMAutomationExecutionRole'
+  lambdaAccountId: '291389708984'
+  xRoleName: 'CloudCoreSvcReadOnly'
+  xRoleAccountId: '291389708984' #ESS-POC
+  awsRegion: 'us-east-1'
+  snsNotificationTopic: 'arn:aws:sns:us-east-1:291389708984:sls-notification'
+

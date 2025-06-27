@@ -1,0 +1,168 @@
+# Serverless - StepFunctions
+
+service: ssm-patch
+
+frameworkVersion: '>=1.62.0 <2.0.0'
+
+provider:
+  name: aws
+  runtime: python3.8
+  stage: ${opt:stage,'dev'}
+  role: arn:aws:iam::${self:custom.config.${self:provider.stage}.lambdaAccountId}:role/${self:custom.config.${self:provider.stage}.lambdaRole}
+
+plugins:
+  - serverless-python-requirements
+  - serverless-step-functions
+  - serverless-plugin-scripts
+custom:
+  pythonRequirements:
+    dockerizePip: true
+    dockerSsh: true
+    pythonBin: ${opt:pythonBin, self:provider.runtime}
+    useDownloadCache: true
+    useStaticCache: true
+  stages:
+    - dev
+    - prod
+  config:
+    ${file(./sls-config.yml)}
+
+package:
+  individually: false
+  exclude:
+    - '**/*'
+  include:
+    - functions/**
+
+functions:
+  ec2-start:
+    handler: functions/ec2_start_handler.lambda_handler
+    environment:
+      STAGE: ${self:provider.stage}
+      X_ROLE_NAME: ${self:custom.config.${self:provider.stage}.xRoleName}
+      X_ROLE_ACCOUNT_ID: ${self:custom.config.${self:provider.stage}.xRoleAccountId}
+      SNS_NOTIFICATION_TOPIC: ${self:custom.config.${self:provider.stage}.snsNotificationTopic}
+  ec2-poller:
+    handler: functions/ec2_poller_handler.lambda_handler
+    environment:
+      STAGE: ${self:provider.stage}
+      X_ROLE_NAME: ${self:custom.config.${self:provider.stage}.xRoleName}
+      X_ROLE_ACCOUNT_ID: ${self:custom.config.${self:provider.stage}.xRoleAccountId}
+      SNS_NOTIFICATION_TOPIC: ${self:custom.config.${self:provider.stage}.snsNotificationTopic}
+  ec2-stop:
+    handler: functions/ec2_stop_handler.lambda_handler
+    environment:
+      STAGE: ${self:provider.stage}
+      X_ROLE_NAME: ${self:custom.config.${self:provider.stage}.xRoleName}
+      X_ROLE_ACCOUNT_ID: ${self:custom.config.${self:provider.stage}.xRoleAccountId}
+      SNS_NOTIFICATION_TOPIC: ${self:custom.config.${self:provider.stage}.snsNotificationTopic}
+  ec2-patch-poller:
+    handler: functions/ec2_patch_poller_handler.lambda_handler
+    environment:
+      STAGE: ${self:provider.stage}
+      X_ROLE_NAME: ${self:custom.config.${self:provider.stage}.xRoleName}
+      X_ROLE_ACCOUNT_ID: ${self:custom.config.${self:provider.stage}.xRoleAccountId}
+      SNS_NOTIFICATION_TOPIC: ${self:custom.config.${self:provider.stage}.snsNotificationTopic}
+  ec2-patch:
+    handler: functions/ec2_patch_handler.lambda_handler
+    environment:
+      STAGE: ${self:provider.stage}
+      X_ROLE_NAME: ${self:custom.config.${self:provider.stage}.xRoleName}
+      X_ROLE_ACCOUNT_ID: ${self:custom.config.${self:provider.stage}.xRoleAccountId}
+      SNS_NOTIFICATION_TOPIC: ${self:custom.config.${self:provider.stage}.snsNotificationTopic}
+
+stepFunctions:
+  stateMachines:
+    SSMStepFunctionDemo:
+      role: 'arn:aws:iam::291389708984:role/CCSvcReadOnlyLambda'
+      name: SSMStepFunction
+      definition:
+        Comment: "A state machine that starts an instance, patches it, then stops it."
+        StartAt: StartInstance
+        States:
+          StartInstance:
+            Type: Task
+            Resource: 'arn:aws:lambda:us-east-1:291389708984:function:ssm-patch-dev-ec2-start'
+            Next: WaitToStart
+          WaitToStart:
+            Type: Wait
+            Seconds: 60
+            Next: CheckInstanceStartStatus
+          CheckInstanceStartStatus:
+            Type: Task
+            Resource: 'arn:aws:lambda:us-east-1:291389708984:function:ssm-patch-dev-ec2-poller'
+            Next: InstanceRunning
+          InstanceRunning:
+            Type: Choice
+            Choices:
+              - Variable: "$.status"
+                StringEquals: 'STARTED'
+                Next: PatchInstance
+              - Variable: "$.status"
+                StringEquals: 'FAILED'
+                Next: InstanceFailedToStart
+            Default: 'WaitToStart'
+          InstanceFailedToStart:
+            Type: Fail
+            Cause: "Instance failed to Start1"
+            Error: "Instance failed to Start"
+          PatchInstance:
+            Type: Task
+            Resource: 'arn:aws:lambda:us-east-1:291389708984:function:ssm-patch-dev-ec2-patch-poller'
+            Next: WaitForPatch
+          WaitForPatch:
+            Type: Wait
+            Seconds: 120
+#            SecondsPath: "$.wait_time"
+            Next: CheckInstancePatchInstance
+          CheckInstancePatchInstance:
+            Type: Task
+            Resource: 'arn:aws:lambda:us-east-1:291389708984:function:ssm-patch-dev-ec2-patch-poller'
+            Next: PatchingFinished
+          PatchingFinished:
+            Type: Choice
+            Choices:
+              - Variable: "$.status"
+                StringEquals: "Failed"
+                Next: PatchFailure
+              - Variable: "$.status"
+                StringEquals: "TimedOut"
+                Next: PatchFailure
+              - Variable: "$.status"
+                StringEquals: "Success"
+                Next: StopInstance
+            Default: 'WaitForPatch'
+          PatchFailure:
+            Type: Fail
+            Cause: "Instance failed to Patch Properly"
+            Error: "Instance failed to Patch Properly"
+          StopInstance:
+            Type: Task
+            Resource: 'arn:aws:lambda:us-east-1:291389708984:function:ssm-patch-dev-ec2-stop'
+            Next: WaitToStop
+          WaitToStop:
+            Type: Wait
+            Seconds: 120
+#            SecondsPath: "$.wait_time"
+            Next: CheckInstanceStopStatus
+          CheckInstanceStopStatus:
+            Type: Task
+            Resource: 'arn:aws:lambda:us-east-1:291389708984:function:ssm-patch-dev-ec2-poller'
+            Next: InstanceStopped
+          InstanceStopped:
+            Type: Choice
+            Choices:
+              - Variable: "$.status"
+                StringEquals: 'FAILED'
+                Next: InstanceFailedToStop
+              - Variable: "$.status"
+                StringEquals: 'STOPPED'
+                Next: Finished
+            Default: WaitToStop
+          InstanceFailedToStop:
+            Type: Fail
+            Cause: "Instance failed to Stop"
+            Error: "Instance failed to Stop"
+          Finished:
+            Type: "Succeed"
+
